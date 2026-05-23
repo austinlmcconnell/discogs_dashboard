@@ -1,9 +1,15 @@
 import { NextResponse } from "next/server";
+import { sql } from "drizzle-orm";
 import { fetchFullCollection, fetchMarketplaceStats } from "@/lib/discogs";
+import { db } from "@/lib/db";
+import { releasePrices } from "@/lib/db/schema";
 
 // Lazy-loaded by the collection grid when the user picks the median-price
-// sort. Each underlying Discogs fetch is cached by Next.js (revalidate=3600),
-// so only the first call after cache expiry actually hits Discogs.
+// sort. Now backed by a SQLite cache table (release_prices) so we only hit
+// Discogs for records we don't already have a fresh value for. Locally this
+// means: slow on first ever load (one Discogs call per release), instant for
+// every subsequent load until rows age out. On Vercel: persists across warm
+// starts, wiped on cold starts (until /tmp is replaced with a managed DB).
 //
 // DATA SOURCE & LABELING NOTE:
 // The user-facing label is "Median price" because that's what matches the
@@ -23,10 +29,19 @@ import { fetchFullCollection, fetchMarketplaceStats } from "@/lib/discogs";
 // If Discogs ever ships a sales-history API, we'd swap this out.
 export const dynamic = "force-dynamic";
 
-// Throttled sequential runner. Discogs allows 60 authenticated requests per
-// minute; we sleep ~1.1s between calls (≈55/min) to stay safely under that.
-// Subsequent calls are served by Next.js's fetch cache (revalidate=86400)
-// and don't actually hit Discogs.
+const TTL_HOURS = 24;
+// Throttle between Discogs calls — Discogs allows 60 authenticated req/min.
+// 850ms ≈ 70/min nominally; with the 429 retry in discogsFetch handling
+// any spillover, we run comfortably close to the limit instead of crawling
+// at 55/min like before.
+const THROTTLE_MS = 850;
+
+type PriceMap = Record<number, number | null>;
+
+// Dedupe overlapping requests during the slow first-load build. While the
+// initial fetch runs, any other GET sees the same Promise.
+let inflight: Promise<PriceMap> | null = null;
+
 async function throttledRun<T, R>(
   items: T[],
   fn: (item: T) => Promise<R>,
@@ -46,65 +61,59 @@ async function throttledRun<T, R>(
   return results;
 }
 
-// Module-level cache for the aggregated map. The first GET populates this
-// (slow, takes ~1 minute per 60 records); subsequent GETs return immediately.
-// 24-hour TTL so prices stay fresh enough without re-running the slow loop.
-//
-// DEPLOY-TIME NOTE: on Vercel, a cold-cache first-run for a large collection
-// (>250 records × 1.1s throttle) can brush the 300s function timeout. If/when
-// this becomes a problem, the right fix is to move the buildPriceMap loop to
-// Vercel Workflow (durable execution, pause/resume, retries) and have this
-// route just read the resulting persisted map. Locally and on the cached
-// path, it's fine.
-type PriceMap = Record<number, number | null>;
-const PRICE_TTL_MS = 24 * 60 * 60 * 1000;
-// Bump SOURCE_VERSION whenever the meaning of the price changes (data source,
-// pick logic, currency handling). Old cache entries with a different version
-// are discarded so the user doesn't see stale values keyed to a defunct
-// definition. Current source: marketplace.lowest_price (Discogs Sales-History
-// "Median" proxy).
-const SOURCE_VERSION = 4;
-let cached: { prices: PriceMap; at: number; version: number } | null = null;
-let inflight: Promise<PriceMap> | null = null;
-
 async function buildPriceMap(): Promise<PriceMap> {
   const releases = await fetchFullCollection();
   const ids = releases.map((r) => r.basic_information.id);
-  const stats = await throttledRun(
-    ids,
-    (id) => fetchMarketplaceStats(id),
-    1100,
-  );
-  const prices: PriceMap = {};
-  for (let i = 0; i < ids.length; i++) {
-    // null = no copies currently for sale on Discogs. Sorted to the end so
-    // priced records bubble to the top.
-    prices[ids[i]] = stats[i]?.lowest_price?.value ?? null;
+
+  // Read the rows we already have that are still fresh.
+  const cutoffIso = new Date(
+    Date.now() - TTL_HOURS * 60 * 60 * 1000,
+  ).toISOString();
+  const existing = db
+    .select()
+    .from(releasePrices)
+    .where(sql`fetched_at > ${cutoffIso}`)
+    .all();
+  const fresh = new Map<number, number | null>();
+  for (const row of existing) fresh.set(row.releaseId, row.price);
+
+  // Anything not in the fresh set needs to be fetched.
+  const missing = ids.filter((id) => !fresh.has(id));
+
+  if (missing.length > 0) {
+    const stats = await throttledRun(
+      missing,
+      (id) => fetchMarketplaceStats(id),
+      THROTTLE_MS,
+    );
+    for (let i = 0; i < missing.length; i++) {
+      const s = stats[i];
+      const price = s?.lowest_price?.value ?? null;
+      const currency = s?.lowest_price?.currency ?? null;
+      db.insert(releasePrices)
+        .values({ releaseId: missing[i], price, currency })
+        .onConflictDoUpdate({
+          target: releasePrices.releaseId,
+          set: { price, currency, fetchedAt: sql`CURRENT_TIMESTAMP` },
+        })
+        .run();
+      fresh.set(missing[i], price);
+    }
   }
+
+  const prices: PriceMap = {};
+  for (const id of ids) prices[id] = fresh.get(id) ?? null;
   return prices;
 }
 
 export async function GET() {
   try {
-    if (
-      cached &&
-      cached.version === SOURCE_VERSION &&
-      Date.now() - cached.at < PRICE_TTL_MS
-    ) {
-      return NextResponse.json(
-        { prices: cached.prices, cached: true },
-        { headers: { "Cache-Control": "private, max-age=300" } },
-      );
-    }
-    // Dedupe overlapping requests during the slow first load.
     if (!inflight) {
       inflight = buildPriceMap().finally(() => {
-        // Always release inflight so a failure doesn't block future retries.
         inflight = null;
       });
     }
     const prices = await inflight;
-    cached = { prices, at: Date.now(), version: SOURCE_VERSION };
     return NextResponse.json(
       { prices },
       { headers: { "Cache-Control": "private, max-age=300" } },

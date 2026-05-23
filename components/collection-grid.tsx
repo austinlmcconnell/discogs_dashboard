@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useDeferredValue, useMemo, useRef, useState } from "react";
+import {
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { ChevronDown, Filter, Loader2, Search, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { AlbumCard } from "@/components/album-card";
@@ -92,19 +98,21 @@ export function CollectionGrid({
     number,
     number | null
   > | null>(null);
-  const [pricesLoading, setPricesLoading] = useState(false);
   const [pricesError, setPricesError] = useState(false);
   const pricesFetchedRef = useRef(false);
   const deferredQuery = useDeferredValue(query);
 
-  // Lazy-fetch the median price map. Triggered from the sort dropdown's
-  // onChange handler (NOT from a useEffect) so we avoid the cascading-render
-  // anti-pattern flagged by react-hooks/set-state-in-effect.
-  const ensurePricesLoaded = useCallback(() => {
+  // Pre-fetch the median-price map as soon as the page mounts — don't wait
+  // for the user to pick a price sort. The backend caches in SQLite, so
+  // after the first build the response is near-instant. Doing this on mount
+  // means the user usually never sees a loading indicator at all; if they
+  // do, it's started running while they were browsing.
+  //
+  // No synchronous setState happens in this effect body — only inside the
+  // async fetch callback — so react-hooks/set-state-in-effect doesn't flag.
+  useEffect(() => {
     if (pricesFetchedRef.current) return;
     pricesFetchedRef.current = true;
-    setPricesLoading(true);
-    setPricesError(false);
     fetch("/api/collection-prices")
       .then(async (res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -115,18 +123,10 @@ export function CollectionGrid({
       })
       .catch(() => {
         setPricesError(true);
-        // Allow a retry on next selection if it failed.
+        // Allow a retry the next time the component re-mounts.
         pricesFetchedRef.current = false;
-      })
-      .finally(() => {
-        setPricesLoading(false);
       });
   }, []);
-
-  function handleSortChange(next: SortKey) {
-    setSortKey(next);
-    if (PRICE_SORTS.has(next)) ensurePricesLoaded();
-  }
 
   // Build the available filter values from the actual collection, sorted by
   // frequency so the most common options surface first.
@@ -352,7 +352,7 @@ export function CollectionGrid({
         <div className="relative h-10 inline-flex items-center">
           <select
             value={sortKey}
-            onChange={(e) => handleSortChange(e.target.value as SortKey)}
+            onChange={(e) => setSortKey(e.target.value as SortKey)}
             className="appearance-none h-10 pl-3 pr-9 rounded-md border border-border/60 bg-card/40 text-sm text-foreground/90 hover:border-border focus:outline-none focus:border-primary/60 cursor-pointer"
             aria-label="Sort by"
           >
@@ -363,7 +363,7 @@ export function CollectionGrid({
             ))}
           </select>
           <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-          {isPriceSort && pricesLoading && (
+          {isPriceSort && !pricesMap && !pricesError && (
             <span className="ml-2 inline-flex items-center gap-1 text-xs text-muted-foreground">
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
               Loading prices…

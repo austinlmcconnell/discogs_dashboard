@@ -44,6 +44,12 @@ sqlite.exec(`
     notes TEXT,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
+  CREATE TABLE IF NOT EXISTS release_prices (
+    release_id INTEGER PRIMARY KEY,
+    price REAL,
+    currency TEXT,
+    fetched_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
 `);
 
 export const db = drizzle(sqlite, { schema });

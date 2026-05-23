@@ -162,12 +162,9 @@ export default async function AlbumPage({
     marketplace?.lowest_price?.value ?? release.lowest_price ?? null;
   const lowestCurrency = marketplace?.lowest_price?.currency ?? "USD";
   const numForSale = marketplace?.num_for_sale ?? release.num_for_sale ?? null;
-
-  const medianSuggestion = priceSuggestions
-    ? priceSuggestions["Very Good Plus (VG+)"] ??
-      priceSuggestions["Near Mint (NM or M-)"] ??
-      Object.values(priceSuggestions)[0]
-    : null;
+  // priceSuggestions is still used below in the "Price by condition" section
+  // for reference, but the headline price stat uses lowestPrice (above)
+  // because price_suggestions runs algorithmically high on older records.
 
   return (
     <div>
@@ -234,16 +231,20 @@ export default async function AlbumPage({
                 value={release.community?.want?.toLocaleString() ?? "—"}
               />
               <Stat
-                label={medianSuggestion ? "Median (VG+)" : "Lowest"}
+                // "Median" here means the marketplace floor — the same number
+                // Discogs surfaces on the release page as "Median". The
+                // price_suggestions endpoint returns an algorithmic seller
+                // suggestion that runs wildly high for older catalog records
+                // ($382 vs $45 for Hunky Dory), so it's NOT used here even
+                // though the "Price by condition" section below still
+                // displays the full per-condition breakdown for reference.
+                label="Median"
                 value={
-                  medianSuggestion
-                    ? formatCurrency(medianSuggestion.value, medianSuggestion.currency) ?? "—"
-                    : formatCurrency(lowestPrice ?? undefined, lowestCurrency) ?? "—"
+                  formatCurrency(lowestPrice ?? undefined, lowestCurrency) ??
+                  "—"
                 }
                 sub={
-                  numForSale != null
-                    ? `${numForSale} for sale${!medianSuggestion && lowestPrice != null ? "" : ""}`
-                    : undefined
+                  numForSale != null ? `${numForSale} for sale` : undefined
                 }
               />
             </div>
