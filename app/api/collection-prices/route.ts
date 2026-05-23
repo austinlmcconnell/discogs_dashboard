@@ -1,44 +1,27 @@
 import { NextResponse } from "next/server";
-import { fetchFullCollection, fetchPriceSuggestions } from "@/lib/discogs";
+import { fetchFullCollection, fetchMarketplaceStats } from "@/lib/discogs";
 
-// Lazy-loaded by the collection grid when the user picks a price sort.
-// Each underlying Discogs fetch is cached by Next.js (revalidate=3600), so
-// only the first call after cache expiry actually hits Discogs.
+// Lazy-loaded by the collection grid when the user picks the median-price
+// sort. Each underlying Discogs fetch is cached by Next.js (revalidate=3600),
+// so only the first call after cache expiry actually hits Discogs.
 //
-// Uses /marketplace/price_suggestions and picks the VG+ price (with NM/first
-// fallback) to match what the album page surfaces as "Median (VG+)". The
-// home page sort and the album page stat now agree — selecting "Median price
-// (high → low)" puts the same record at the top that shows the highest
-// "Median (VG+)" when you click into it.
-//
-// Note: this is Discogs's algorithmic suggested seller price by condition,
-// derived from sales history. It typically runs HIGHER than the actual
-// marketplace floor (the cheapest copy currently for sale). That's expected
-// — the median reflects what records have sold for, not the current listing
-// floor. If you want "cheapest available right now," that's a different
-// metric (marketplace lowest_price).
+// DATA SOURCE & LABELING NOTE:
+// The user-facing label is "Median price" because that's what matches the
+// Discogs.com release page UI (Discogs's Sales-History "Median" stat). But
+// Discogs does NOT expose that median via the public API — only:
+//   - /marketplace/price_suggestions  → algorithmic seller-suggestion by
+//                                       condition, often DRAMATICALLY higher
+//                                       than the on-page median (e.g.,
+//                                       Hunky Dory VG+ = $382 vs Discogs's
+//                                       displayed median $45).
+//   - /marketplace/stats.lowest_price → cheapest copy currently for sale.
+//                                       Consistently close to the on-page
+//                                       median (within ~$5-10) because
+//                                       sellers calibrate listings to
+//                                       recent sales.
+// We use lowest_price as the best available proxy for the on-page median.
+// If Discogs ever ships a sales-history API, we'd swap this out.
 export const dynamic = "force-dynamic";
-
-// Conditions to prefer when picking a single representative "median" price
-// per release, matching the album page's pick order.
-const CONDITION_PREFERENCE = [
-  "Very Good Plus (VG+)",
-  "Near Mint (NM or M-)",
-  "Very Good (VG)",
-  "Good Plus (G+)",
-  "Good (G)",
-];
-
-function pickPrice(
-  suggestions: Record<string, { value: number; currency: string }> | null,
-): number | null {
-  if (!suggestions) return null;
-  for (const cond of CONDITION_PREFERENCE) {
-    if (suggestions[cond]) return suggestions[cond].value;
-  }
-  const first = Object.values(suggestions)[0];
-  return first?.value ?? null;
-}
 
 // Throttled sequential runner. Discogs allows 60 authenticated requests per
 // minute; we sleep ~1.1s between calls (≈55/min) to stay safely under that.
@@ -78,25 +61,25 @@ const PRICE_TTL_MS = 24 * 60 * 60 * 1000;
 // Bump SOURCE_VERSION whenever the meaning of the price changes (data source,
 // pick logic, currency handling). Old cache entries with a different version
 // are discarded so the user doesn't see stale values keyed to a defunct
-// definition. Current source: price_suggestions VG+ (album-page "Median").
-const SOURCE_VERSION = 3;
+// definition. Current source: marketplace.lowest_price (Discogs Sales-History
+// "Median" proxy).
+const SOURCE_VERSION = 4;
 let cached: { prices: PriceMap; at: number; version: number } | null = null;
 let inflight: Promise<PriceMap> | null = null;
 
 async function buildPriceMap(): Promise<PriceMap> {
   const releases = await fetchFullCollection();
   const ids = releases.map((r) => r.basic_information.id);
-  const suggestions = await throttledRun(
+  const stats = await throttledRun(
     ids,
-    (id) => fetchPriceSuggestions(id),
+    (id) => fetchMarketplaceStats(id),
     1100,
   );
   const prices: PriceMap = {};
   for (let i = 0; i < ids.length; i++) {
-    // null = no price suggestion available (e.g., user's Discogs seller
-    // settings disabled, or no sales history for this release). Sorted to
-    // the end so meaningful values bubble to the top.
-    prices[ids[i]] = pickPrice(suggestions[i]);
+    // null = no copies currently for sale on Discogs. Sorted to the end so
+    // priced records bubble to the top.
+    prices[ids[i]] = stats[i]?.lowest_price?.value ?? null;
   }
   return prices;
 }

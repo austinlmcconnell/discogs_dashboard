@@ -2,12 +2,22 @@ import { Suspense } from "react";
 import { fetchFullCollection } from "@/lib/discogs";
 import { CollectionGrid } from "@/components/collection-grid";
 import { Skeleton } from "@/components/ui/skeleton";
+import { db } from "@/lib/db";
+import { ratings } from "@/lib/db/schema";
 
 export const revalidate = 3600;
 
 async function Collection() {
-  const releases = await fetchFullCollection();
-  return <CollectionGrid releases={releases} />;
+  // Pull the user's local ratings alongside the Discogs collection so the
+  // grid can offer a "Sort by my rating" option. Ratings live in SQLite, so
+  // this is a fast local read with no network dep.
+  const [releases, allRatings] = await Promise.all([
+    fetchFullCollection(),
+    Promise.resolve(db.select().from(ratings).all()),
+  ]);
+  const ratingMap: Record<number, number> = {};
+  for (const r of allRatings) ratingMap[r.releaseId] = r.rating;
+  return <CollectionGrid releases={releases} ratingMap={ratingMap} />;
 }
 
 function CollectionSkeleton() {

@@ -19,7 +19,9 @@ type SortKey =
   | "year-desc"
   | "year-asc"
   | "price-desc"
-  | "price-asc";
+  | "price-asc"
+  | "rating-desc"
+  | "rating-asc";
 
 const SORTS: { key: SortKey; label: string }[] = [
   { key: "date-added-desc", label: "Recently added" },
@@ -30,6 +32,8 @@ const SORTS: { key: SortKey; label: string }[] = [
   { key: "title-desc", label: "Title (Z–A)" },
   { key: "year-desc", label: "Year (newest)" },
   { key: "year-asc", label: "Year (oldest)" },
+  { key: "rating-desc", label: "My rating (high → low)" },
+  { key: "rating-asc", label: "My rating (low → high)" },
   { key: "price-desc", label: "Median price (high → low)" },
   { key: "price-asc", label: "Median price (low → high)" },
 ];
@@ -65,7 +69,13 @@ function isColoredVinyl(release: CollectionRelease): boolean {
 
 const PRICE_SORTS: ReadonlySet<SortKey> = new Set(["price-desc", "price-asc"]);
 
-export function CollectionGrid({ releases }: { releases: CollectionRelease[] }) {
+export function CollectionGrid({
+  releases,
+  ratingMap = {},
+}: {
+  releases: CollectionRelease[];
+  ratingMap?: Record<number, number>;
+}) {
   const [query, setQuery] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("date-added-desc");
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -241,6 +251,27 @@ export function CollectionGrid({ releases }: { releases: CollectionRelease[] }) 
           return pa - pb;
         });
         break;
+      case "rating-desc":
+        // Unrated records sort to the END — same convention as price.
+        sorted.sort((a, b) => {
+          const ra = ratingMap[a.basic_information.id];
+          const rb = ratingMap[b.basic_information.id];
+          if (ra == null && rb == null) return 0;
+          if (ra == null) return 1;
+          if (rb == null) return -1;
+          return rb - ra;
+        });
+        break;
+      case "rating-asc":
+        sorted.sort((a, b) => {
+          const ra = ratingMap[a.basic_information.id];
+          const rb = ratingMap[b.basic_information.id];
+          if (ra == null && rb == null) return 0;
+          if (ra == null) return 1;
+          if (rb == null) return -1;
+          return ra - rb;
+        });
+        break;
     }
     return sorted;
   }, [
@@ -251,6 +282,7 @@ export function CollectionGrid({ releases }: { releases: CollectionRelease[] }) 
     selectedDecades,
     selectedColors,
     pricesMap,
+    ratingMap,
   ]);
 
   function toggleString(

@@ -1,7 +1,7 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { desc, eq } from "drizzle-orm";
-import { ArrowLeft, ExternalLink } from "lucide-react";
+import { ExternalLink } from "lucide-react";
+import { CollectionBackLink } from "@/components/collection-back-link";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { buttonVariants } from "@/components/ui/button";
@@ -173,13 +173,7 @@ export default async function AlbumPage({
     <div>
       <div className="border-b border-border/30 relative isolate">
         <div className="max-w-6xl mx-auto px-6 pt-6 relative z-10">
-          <Link
-            href="/"
-            className="inline-flex items-center gap-1.5 text-sm text-foreground/70 hover:text-foreground transition-colors"
-          >
-            <ArrowLeft className="w-3.5 h-3.5" />
-            Collection
-          </Link>
+          <CollectionBackLink />
         </div>
 
         <div className="max-w-6xl mx-auto px-6 py-10 lg:py-16 grid lg:grid-cols-[minmax(0,480px)_1fr] gap-10 lg:gap-12 items-center relative z-10">
