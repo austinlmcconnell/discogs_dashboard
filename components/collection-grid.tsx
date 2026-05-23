@@ -30,8 +30,8 @@ const SORTS: { key: SortKey; label: string }[] = [
   { key: "title-desc", label: "Title (Z–A)" },
   { key: "year-desc", label: "Year (newest)" },
   { key: "year-asc", label: "Year (oldest)" },
-  { key: "price-desc", label: "Lowest for sale (high → low)" },
-  { key: "price-asc", label: "Lowest for sale (low → high)" },
+  { key: "price-desc", label: "Median price (high → low)" },
+  { key: "price-asc", label: "Median price (low → high)" },
 ];
 
 const COLOR_FILTERS = ["Colored", "Black"] as const;
