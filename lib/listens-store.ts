@@ -11,9 +11,9 @@ import { getRedis } from "@/lib/redis";
 //     Vercel env-pull. Same shape, just slower to migrate to prod since data
 //     lives in two places.
 //
-// The choice is made at call time based on env vars — there's no toggling
-// behavior. On Vercel the Redis path is always taken because the Marketplace
-// integration auto-sets UPSTASH_REDIS_REST_URL / _TOKEN.
+// READ paths catch errors and return empty results so a transient Redis
+// failure doesn't take down the page render. WRITE paths let errors bubble
+// so the caller can surface a toast.
 
 export type Listen = {
   id: number;
@@ -24,48 +24,68 @@ export type Listen = {
 
 const LISTENS_KEY = (releaseId: number) => `listens:${releaseId}`;
 const NEXT_ID_KEY = "listens:next-id";
-// Tracks every release that has at least one listen, so `listAllListens()`
-// can enumerate without a slow KEYS-scan.
 const INDEX_KEY = "listens:index";
 
 export async function listListens(releaseId: number): Promise<Listen[]> {
   const redis = getRedis();
   if (redis) {
-    const items = await redis.lrange<Listen>(LISTENS_KEY(releaseId), 0, -1);
-    // LPUSH puts newest at head, so LRANGE 0..-1 is already
-    // newest-first — sort defensively in case rows were inserted out-of-order.
-    return [...items].sort((a, b) =>
-      b.listenedAt.localeCompare(a.listenedAt),
-    );
+    try {
+      const items = await redis.lrange<Listen>(LISTENS_KEY(releaseId), 0, -1);
+      return [...items].sort((a, b) =>
+        b.listenedAt.localeCompare(a.listenedAt),
+      );
+    } catch (err) {
+      console.error("[listens-store] redis listListens failed:", err);
+      return [];
+    }
   }
-  return db
-    .select()
-    .from(listens)
-    .where(eq(listens.releaseId, releaseId))
-    .orderBy(desc(listens.listenedAt))
-    .all();
+  try {
+    return db
+      .select()
+      .from(listens)
+      .where(eq(listens.releaseId, releaseId))
+      .orderBy(desc(listens.listenedAt))
+      .all();
+  } catch (err) {
+    console.error("[listens-store] sqlite listListens failed:", err);
+    return [];
+  }
 }
 
 export async function listAllListens(limit = 200): Promise<Listen[]> {
   const redis = getRedis();
   if (redis) {
-    const ids = await redis.smembers(INDEX_KEY);
-    if (ids.length === 0) return [];
-    const all: Listen[] = [];
-    for (const id of ids) {
-      const items = await redis.lrange<Listen>(LISTENS_KEY(Number(id)), 0, -1);
-      all.push(...items);
+    try {
+      const ids = await redis.smembers(INDEX_KEY);
+      if (ids.length === 0) return [];
+      const all: Listen[] = [];
+      for (const id of ids) {
+        const items = await redis.lrange<Listen>(
+          LISTENS_KEY(Number(id)),
+          0,
+          -1,
+        );
+        all.push(...items);
+      }
+      return all
+        .sort((a, b) => b.listenedAt.localeCompare(a.listenedAt))
+        .slice(0, limit);
+    } catch (err) {
+      console.error("[listens-store] redis listAllListens failed:", err);
+      return [];
     }
-    return all
-      .sort((a, b) => b.listenedAt.localeCompare(a.listenedAt))
-      .slice(0, limit);
   }
-  return db
-    .select()
-    .from(listens)
-    .orderBy(desc(listens.listenedAt))
-    .limit(limit)
-    .all();
+  try {
+    return db
+      .select()
+      .from(listens)
+      .orderBy(desc(listens.listenedAt))
+      .limit(limit)
+      .all();
+  } catch (err) {
+    console.error("[listens-store] sqlite listAllListens failed:", err);
+    return [];
+  }
 }
 
 export async function addListen(

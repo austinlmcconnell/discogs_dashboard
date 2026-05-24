@@ -11,6 +11,10 @@ import { getRedis } from "@/lib/redis";
 //   - ratings:index      = SET of release IDs that have a rating. Used by
 //                          `listAllRatings()` so we don't have to do a KEYS
 //                          scan (O(N) over all Redis keys, anti-pattern).
+//
+// READ paths catch errors and return safe defaults so a transient Redis
+// failure doesn't take down the page render. WRITE paths let errors bubble
+// so the caller can surface a toast.
 
 export type Rating = {
   releaseId: number;
@@ -25,14 +29,24 @@ const INDEX_KEY = "ratings:index";
 export async function getRating(releaseId: number): Promise<Rating | null> {
   const redis = getRedis();
   if (redis) {
-    return (await redis.get<Rating>(RATING_KEY(releaseId))) ?? null;
+    try {
+      return (await redis.get<Rating>(RATING_KEY(releaseId))) ?? null;
+    } catch (err) {
+      console.error("[ratings-store] redis getRating failed:", err);
+      return null;
+    }
   }
-  const row = db
-    .select()
-    .from(ratings)
-    .where(eq(ratings.releaseId, releaseId))
-    .get();
-  return row ?? null;
+  try {
+    const row = db
+      .select()
+      .from(ratings)
+      .where(eq(ratings.releaseId, releaseId))
+      .get();
+    return row ?? null;
+  } catch (err) {
+    console.error("[ratings-store] sqlite getRating failed:", err);
+    return null;
+  }
 }
 
 export async function setRating(
@@ -81,11 +95,21 @@ export async function deleteRating(releaseId: number): Promise<void> {
 export async function listAllRatings(): Promise<Rating[]> {
   const redis = getRedis();
   if (redis) {
-    const ids = await redis.smembers(INDEX_KEY);
-    if (ids.length === 0) return [];
-    const keys = ids.map((id) => RATING_KEY(Number(id)));
-    const values = await redis.mget<(Rating | null)[]>(...keys);
-    return values.filter((v): v is Rating => v !== null);
+    try {
+      const ids = await redis.smembers(INDEX_KEY);
+      if (ids.length === 0) return [];
+      const keys = ids.map((id) => RATING_KEY(Number(id)));
+      const values = await redis.mget<(Rating | null)[]>(...keys);
+      return values.filter((v): v is Rating => v !== null);
+    } catch (err) {
+      console.error("[ratings-store] redis listAllRatings failed:", err);
+      return [];
+    }
   }
-  return db.select().from(ratings).all();
+  try {
+    return db.select().from(ratings).all();
+  } catch (err) {
+    console.error("[ratings-store] sqlite listAllRatings failed:", err);
+    return [];
+  }
 }
