@@ -4,7 +4,12 @@ import { CollectionGrid } from "@/components/collection-grid";
 import { Skeleton } from "@/components/ui/skeleton";
 import { listAllRatings } from "@/lib/ratings-store";
 
-export const revalidate = 3600;
+// The home page reads the user's ratings on every request so the rating
+// sort reflects changes immediately. The expensive Discogs collection fetch
+// (fetchFullCollection) is still cached at the fetch level for an hour via
+// discogsFetch's revalidate option, so making this page dynamic only costs
+// a Redis read (~50ms) per request.
+export const dynamic = "force-dynamic";
 
 async function Collection() {
   // Pull the user's ratings alongside the Discogs collection so the grid

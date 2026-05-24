@@ -7,6 +7,13 @@ import {
   useRef,
   useState,
 } from "react";
+
+// Stash the grid's scroll position in sessionStorage so navigating into an
+// album page and back (via browser back, router.back(), or the "Collection"
+// button) lands the user where they left off. App Router's built-in scroll
+// restoration is unreliable for our setup (mix of dynamic page + client grid),
+// so we manage it manually.
+const SCROLL_KEY = "collection-scroll";
 import { ChevronDown, Filter, Loader2, Search, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { AlbumCard } from "@/components/album-card";
@@ -126,6 +133,30 @@ export function CollectionGrid({
         // Allow a retry the next time the component re-mounts.
         pricesFetchedRef.current = false;
       });
+  }, []);
+
+  // Scroll restoration: restore on mount if we have a saved position, then
+  // continuously save the current scrollY (debounced) so any time the user
+  // navigates away the latest position is captured. Passive listener per
+  // client-passive-event-listeners best practice.
+  useEffect(() => {
+    const saved = sessionStorage.getItem(SCROLL_KEY);
+    if (saved) {
+      const y = parseInt(saved, 10);
+      if (Number.isFinite(y)) window.scrollTo(0, y);
+    }
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const onScroll = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        sessionStorage.setItem(SCROLL_KEY, String(window.scrollY));
+      }, 100);
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      if (timer) clearTimeout(timer);
+      window.removeEventListener("scroll", onScroll);
+    };
   }, []);
 
   // Build the available filter values from the actual collection, sorted by

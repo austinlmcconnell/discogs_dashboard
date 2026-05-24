@@ -345,7 +345,11 @@ export default async function AlbumPage({
 
           <Section title="Listens">
             <div className="rounded-lg border border-border/60 bg-card/40 p-4">
-              <ListenLog releaseId={releaseId} initialListens={userListens} />
+              <ListenLog
+                releaseId={releaseId}
+                initialListens={userListens}
+                initialRating={userRating?.rating ?? null}
+              />
             </div>
           </Section>
 
