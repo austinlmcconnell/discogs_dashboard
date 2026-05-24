@@ -7,11 +7,15 @@ export const dynamic = "force-dynamic";
 
 function formatDate(iso: string) {
   const d = new Date(iso.endsWith("Z") ? iso : `${iso}Z`);
-  // Eastern Time. America/New_York handles EST/EDT switching automatically
-  // via the Intl runtime so we never need to track DST manually.
+  // Explicit component options (NOT dateStyle/timeStyle) — the Intl spec
+  // throws "Invalid option : option" if you combine dateStyle/timeStyle with
+  // timeZoneName. America/New_York handles EST/EDT switching automatically.
   return d.toLocaleString(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
     timeZone: "America/New_York",
     timeZoneName: "short",
   });
