@@ -2,18 +2,18 @@ import { Suspense } from "react";
 import { fetchFullCollection } from "@/lib/discogs";
 import { CollectionGrid } from "@/components/collection-grid";
 import { Skeleton } from "@/components/ui/skeleton";
-import { db } from "@/lib/db";
-import { ratings } from "@/lib/db/schema";
+import { listAllRatings } from "@/lib/ratings-store";
 
 export const revalidate = 3600;
 
 async function Collection() {
-  // Pull the user's local ratings alongside the Discogs collection so the
-  // grid can offer a "Sort by my rating" option. Ratings live in SQLite, so
-  // this is a fast local read with no network dep.
+  // Pull the user's ratings alongside the Discogs collection so the grid
+  // can offer a "Sort by my rating" option. ratings-store routes through
+  // Upstash Redis in production (persistent across cold starts) and falls
+  // back to local SQLite in dev.
   const [releases, allRatings] = await Promise.all([
     fetchFullCollection(),
-    Promise.resolve(db.select().from(ratings).all()),
+    listAllRatings(),
   ]);
   const ratingMap: Record<number, number> = {};
   for (const r of allRatings) ratingMap[r.releaseId] = r.rating;

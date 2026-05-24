@@ -1,5 +1,4 @@
 import { notFound } from "next/navigation";
-import { desc, eq } from "drizzle-orm";
 import { ExternalLink } from "lucide-react";
 import { CollectionBackLink } from "@/components/collection-back-link";
 import { Badge } from "@/components/ui/badge";
@@ -8,8 +7,8 @@ import { buttonVariants } from "@/components/ui/button";
 import { ListenLog } from "@/components/listen-log";
 import { RatingInput } from "@/components/rating-input";
 import { VinylSleeve } from "@/components/vinyl-sleeve";
-import { db } from "@/lib/db";
-import { listens, ratings } from "@/lib/db/schema";
+import { listListens } from "@/lib/listens-store";
+import { getRating } from "@/lib/ratings-store";
 import {
   fetchMarketplaceStats,
   fetchPriceSuggestions,
@@ -59,17 +58,14 @@ export default async function AlbumPage({
 
   const artist = release.artists.map((a) => a.name).join(", ");
 
-  const [priceSuggestions, marketplace, wiki, userListens, userRating] = await Promise.all([
-    fetchPriceSuggestions(releaseId),
-    fetchMarketplaceStats(releaseId),
-    fetchAlbumWiki(artist, release.title, release.year),
-    db
-      .select()
-      .from(listens)
-      .where(eq(listens.releaseId, releaseId))
-      .orderBy(desc(listens.listenedAt)),
-    db.select().from(ratings).where(eq(ratings.releaseId, releaseId)).get(),
-  ]);
+  const [priceSuggestions, marketplace, wiki, userListens, userRating] =
+    await Promise.all([
+      fetchPriceSuggestions(releaseId),
+      fetchMarketplaceStats(releaseId),
+      fetchAlbumWiki(artist, release.title, release.year),
+      listListens(releaseId),
+      getRating(releaseId),
+    ]);
 
   const cover = release.images?.[0]?.uri ?? "";
   const secondaryImages = (release.images ?? []).filter((img) => img.type !== "primary");

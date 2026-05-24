@@ -1,9 +1,7 @@
 import Link from "next/link";
 import Image from "next/image";
-import { desc } from "drizzle-orm";
-import { db } from "@/lib/db";
-import { listens } from "@/lib/db/schema";
 import { fetchFullCollection, primaryArtist } from "@/lib/discogs";
+import { listAllListens } from "@/lib/listens-store";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +12,7 @@ function formatDate(iso: string) {
 
 export default async function ListensPage() {
   const [rows, releases] = await Promise.all([
-    db.select().from(listens).orderBy(desc(listens.listenedAt)).limit(200),
+    listAllListens(200),
     fetchFullCollection(),
   ]);
 
@@ -28,7 +26,7 @@ export default async function ListensPage() {
         </div>
         <h1 className="text-3xl md:text-4xl font-semibold tracking-tight">Recent listens</h1>
         <p className="text-sm text-muted-foreground">
-          Everything you've logged, most recent first.
+          Everything you&apos;ve logged, most recent first.
         </p>
       </div>
 

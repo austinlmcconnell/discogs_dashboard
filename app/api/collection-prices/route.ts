@@ -1,42 +1,57 @@
 import { NextResponse } from "next/server";
 import { sql } from "drizzle-orm";
+import { Redis } from "@upstash/redis";
 import { fetchFullCollection, fetchMarketplaceStats } from "@/lib/discogs";
 import { db } from "@/lib/db";
 import { releasePrices } from "@/lib/db/schema";
 
-// Lazy-loaded by the collection grid when the user picks the median-price
-// sort. Now backed by a SQLite cache table (release_prices) so we only hit
-// Discogs for records we don't already have a fresh value for. Locally this
-// means: slow on first ever load (one Discogs call per release), instant for
-// every subsequent load until rows age out. On Vercel: persists across warm
-// starts, wiped on cold starts (until /tmp is replaced with a managed DB).
+// Median-price map for the collection grid's sort. Two-tier cache:
+//   1. Upstash Redis (via Vercel Marketplace integration). Persists across
+//      Vercel cold starts so first-load latency is ~50ms regardless of how
+//      long the function instance has been idle. Keyed `price:<release_id>`
+//      with a 24h TTL; bulk-read via mget.
+//   2. Local SQLite (release_prices table). Fallback when Redis env vars
+//      aren't present (typical local dev with no Vercel CLI link). Persists
+//      across dev server restarts.
+//
+// Either way, the build path is: read cache → identify missing release IDs
+// → throttled fetch from /marketplace/stats for the missing → write back.
 //
 // DATA SOURCE & LABELING NOTE:
 // The user-facing label is "Median price" because that's what matches the
-// Discogs.com release page UI (Discogs's Sales-History "Median" stat). But
-// Discogs does NOT expose that median via the public API — only:
-//   - /marketplace/price_suggestions  → algorithmic seller-suggestion by
-//                                       condition, often DRAMATICALLY higher
-//                                       than the on-page median (e.g.,
-//                                       Hunky Dory VG+ = $382 vs Discogs's
-//                                       displayed median $45).
-//   - /marketplace/stats.lowest_price → cheapest copy currently for sale.
-//                                       Consistently close to the on-page
-//                                       median (within ~$5-10) because
-//                                       sellers calibrate listings to
-//                                       recent sales.
-// We use lowest_price as the best available proxy for the on-page median.
-// If Discogs ever ships a sales-history API, we'd swap this out.
+// Discogs.com release page UI (Discogs's Sales-History "Median" stat).
+// Discogs doesn't expose that median via the public API; lowest_price
+// (marketplace floor) tracks within ~$5-10 because sellers calibrate
+// listings to recent sales. See the album page for the same trade-off.
 export const dynamic = "force-dynamic";
 
 const TTL_HOURS = 24;
-// Throttle between Discogs calls — Discogs allows 60 authenticated req/min.
-// 850ms ≈ 70/min nominally; with the 429 retry in discogsFetch handling
-// any spillover, we run comfortably close to the limit instead of crawling
-// at 55/min like before.
+const TTL_SECONDS = TTL_HOURS * 60 * 60;
+// Discogs allows 60 authenticated req/min; 850ms ≈ 70/min nominally, with
+// discogsFetch's 429 retry-with-backoff handling any spillover.
 const THROTTLE_MS = 850;
 
 type PriceMap = Record<number, number | null>;
+type PriceEntry = { price: number | null; currency: string | null };
+
+// Lazy-init Redis singleton. Returns null when env vars aren't set so we
+// don't crash on local dev / first deploy before the Marketplace
+// integration is connected. Both the canonical UPSTASH_* names and the
+// legacy KV_* names are checked for compatibility with older provisioning.
+let _redis: Redis | null = null;
+let _redisInitialized = false;
+function getRedis(): Redis | null {
+  if (_redisInitialized) return _redis;
+  _redisInitialized = true;
+  const url =
+    process.env.UPSTASH_REDIS_REST_URL ?? process.env.KV_REST_API_URL;
+  const token =
+    process.env.UPSTASH_REDIS_REST_TOKEN ?? process.env.KV_REST_API_TOKEN;
+  if (url && token) {
+    _redis = new Redis({ url, token });
+  }
+  return _redis;
+}
 
 // Dedupe overlapping requests during the slow first-load build. While the
 // initial fetch runs, any other GET sees the same Promise.
@@ -61,11 +76,52 @@ async function throttledRun<T, R>(
   return results;
 }
 
-async function buildPriceMap(): Promise<PriceMap> {
+async function buildWithRedis(redis: Redis): Promise<PriceMap> {
+  const releases = await fetchFullCollection();
+  const ids = releases.map((release) => release.basic_information.id);
+
+  // Bulk-read every release's cached entry in one round-trip. @upstash/redis
+  // auto-parses JSON values, so cached entries come back as PriceEntry | null.
+  const keys = ids.map((id) => `price:${id}`);
+  const cached =
+    keys.length > 0 ? await redis.mget<(PriceEntry | null)[]>(...keys) : [];
+
+  const map = new Map<number, number | null>();
+  const missing: number[] = [];
+  for (let i = 0; i < ids.length; i++) {
+    const entry = cached[i];
+    if (entry == null) missing.push(ids[i]);
+    else map.set(ids[i], entry.price);
+  }
+
+  if (missing.length > 0) {
+    const stats = await throttledRun(
+      missing,
+      (id) => fetchMarketplaceStats(id),
+      THROTTLE_MS,
+    );
+    const pipeline = redis.pipeline();
+    for (let i = 0; i < missing.length; i++) {
+      const s = stats[i];
+      const entry: PriceEntry = {
+        price: s?.lowest_price?.value ?? null,
+        currency: s?.lowest_price?.currency ?? null,
+      };
+      pipeline.set(`price:${missing[i]}`, entry, { ex: TTL_SECONDS });
+      map.set(missing[i], entry.price);
+    }
+    await pipeline.exec();
+  }
+
+  const prices: PriceMap = {};
+  for (const id of ids) prices[id] = map.get(id) ?? null;
+  return prices;
+}
+
+async function buildWithSqlite(): Promise<PriceMap> {
   const releases = await fetchFullCollection();
   const ids = releases.map((r) => r.basic_information.id);
 
-  // Read the rows we already have that are still fresh.
   const cutoffIso = new Date(
     Date.now() - TTL_HOURS * 60 * 60 * 1000,
   ).toISOString();
@@ -77,7 +133,6 @@ async function buildPriceMap(): Promise<PriceMap> {
   const fresh = new Map<number, number | null>();
   for (const row of existing) fresh.set(row.releaseId, row.price);
 
-  // Anything not in the fresh set needs to be fetched.
   const missing = ids.filter((id) => !fresh.has(id));
 
   if (missing.length > 0) {
@@ -104,6 +159,11 @@ async function buildPriceMap(): Promise<PriceMap> {
   const prices: PriceMap = {};
   for (const id of ids) prices[id] = fresh.get(id) ?? null;
   return prices;
+}
+
+async function buildPriceMap(): Promise<PriceMap> {
+  const redis = getRedis();
+  return redis ? buildWithRedis(redis) : buildWithSqlite();
 }
 
 export async function GET() {
