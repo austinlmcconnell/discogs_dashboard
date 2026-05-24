@@ -2,24 +2,9 @@ import Link from "next/link";
 import Image from "next/image";
 import { fetchFullCollection, primaryArtist } from "@/lib/discogs";
 import { listAllListens } from "@/lib/listens-store";
+import { ListenDateEditor } from "@/components/listen-date-editor";
 
 export const dynamic = "force-dynamic";
-
-function formatDate(iso: string) {
-  const d = new Date(iso.endsWith("Z") ? iso : `${iso}Z`);
-  // Explicit component options (NOT dateStyle/timeStyle) — the Intl spec
-  // throws "Invalid option : option" if you combine dateStyle/timeStyle with
-  // timeZoneName. America/New_York handles EST/EDT switching automatically.
-  return d.toLocaleString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    timeZone: "America/New_York",
-    timeZoneName: "short",
-  });
-}
 
 export default async function ListensPage() {
   const [rows, releases] = await Promise.all([
@@ -80,8 +65,12 @@ export default async function ListensPage() {
                   {r && (
                     <div className="text-xs text-muted-foreground">{primaryArtist(r)}</div>
                   )}
-                  <div className="text-[11px] text-muted-foreground/80 mt-1 uppercase tracking-wider tabular-nums">
-                    {formatDate(l.listenedAt)}
+                  <div className="mt-1">
+                    <ListenDateEditor
+                      releaseId={l.releaseId}
+                      listenId={l.id}
+                      listenedAt={l.listenedAt}
+                    />
                   </div>
                   {l.notes && (
                     <div className="text-sm mt-2 whitespace-pre-wrap text-foreground/85">

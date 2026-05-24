@@ -5,7 +5,6 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { buttonVariants } from "@/components/ui/button";
 import { ListenLog } from "@/components/listen-log";
-import { RatingInput } from "@/components/rating-input";
 import { VinylSleeve } from "@/components/vinyl-sleeve";
 import { listListens } from "@/lib/listens-store";
 import { getRating } from "@/lib/ratings-store";
@@ -337,13 +336,7 @@ export default async function AlbumPage({
         </div>
 
         <aside className="space-y-8">
-          <Section title="Your rating">
-            <div className="rounded-lg border border-border/60 bg-card/40 p-4">
-              <RatingInput releaseId={releaseId} initialRating={userRating?.rating ?? null} />
-            </div>
-          </Section>
-
-          <Section title="Listens">
+          <Section title="Listens & rating">
             <div className="rounded-lg border border-border/60 bg-card/40 p-4">
               <ListenLog
                 releaseId={releaseId}

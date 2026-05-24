@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Spin — your record collection",
+  title: "SpinTrack — your record collection",
   description: "Your Discogs collection, randomized, rated, and Wikipedia'd.",
 };
 
@@ -35,11 +35,11 @@ export default function RootLayout({
           <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
             <Link href="/" className="flex items-center gap-2 group">
               <Disc3 className="w-5 h-5 text-primary transition-transform group-hover:rotate-180 duration-700" />
-              <span className="font-semibold tracking-tight text-base">Spin</span>
+              <span className="font-semibold tracking-tight text-base">SpinTrack</span>
             </Link>
             <nav className="flex items-center gap-1 text-sm">
               <NavLink href="/">Collection</NavLink>
-              <NavLink href="/random">Shuffle</NavLink>
+              <NavLink href="/random">Spin</NavLink>
               <NavLink href="/listens">Listens</NavLink>
             </nav>
           </div>

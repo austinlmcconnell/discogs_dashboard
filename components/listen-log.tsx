@@ -10,18 +10,13 @@ import type { Listen } from "@/lib/listens-store";
 
 function formatDate(iso: string) {
   const d = new Date(iso.endsWith("Z") ? iso : `${iso}Z`);
-  // Explicit component options (NOT dateStyle/timeStyle). The Intl spec
-  // forbids combining dateStyle/timeStyle with individual component options
-  // like timeZoneName — it throws "Invalid option : option" at runtime,
-  // which is exactly the crash that took down album + listens pages.
-  return d.toLocaleString(undefined, {
+  // Date only (no time). EST/EDT timezone so the date matches the user's
+  // calendar regardless of the underlying UTC timestamp.
+  return d.toLocaleDateString(undefined, {
     year: "numeric",
     month: "short",
     day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
     timeZone: "America/New_York",
-    timeZoneName: "short",
   });
 }
 

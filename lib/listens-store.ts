@@ -112,3 +112,38 @@ export async function addListen(
     .get();
   return row;
 }
+
+// Update the listenedAt timestamp of a specific listen. Redis lists don't
+// support in-place updates, so the Redis path does a read-modify-rewrite
+// over the small per-release list (a handful of entries in practice).
+export async function updateListenDate(
+  releaseId: number,
+  id: number,
+  listenedAt: string,
+): Promise<Listen | null> {
+  const redis = getRedis();
+  if (redis) {
+    const all = await redis.lrange<Listen>(LISTENS_KEY(releaseId), 0, -1);
+    let updated: Listen | null = null;
+    const next = all.map((l) => {
+      if (l.id !== id) return l;
+      updated = { ...l, listenedAt };
+      return updated;
+    });
+    if (!updated) return null;
+    await redis.del(LISTENS_KEY(releaseId));
+    // lpush args go to the head one-by-one — pass reversed so the final list
+    // order matches the original (newest-first).
+    if (next.length > 0) {
+      await redis.lpush(LISTENS_KEY(releaseId), ...next.slice().reverse());
+    }
+    return updated;
+  }
+  const row = db
+    .update(listens)
+    .set({ listenedAt })
+    .where(eq(listens.id, id))
+    .returning()
+    .get();
+  return row ?? null;
+}
