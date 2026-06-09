@@ -193,14 +193,21 @@ export function ringCheckColors(explicit: RGB[] | null): RGB[] {
 
 // Extract a color name from free-form text using the same color map detectVinyl
 // uses. Used to honor sheet-override notes like "Use pink to create custom SVG
-// version" or "Outer green color" — the note literally states the intended
-// color, so we should use it directly instead of trying to sample the image.
-// Returns the hex string for the first recognized color, or null.
+// version" or "Dark brown with faint yellow swirl".
+//
+// Picks the color whose name appears EARLIEST in the text — not the first key
+// in iteration order. That way "Dark brown with faint yellow swirl" returns
+// brown, not yellow. Matches the natural-language convention where the
+// primary color is mentioned first.
 export function colorHexFromText(text: string): string | null {
   const lower = text.toLowerCase();
+  let earliest: { idx: number; hex: string } | null = null;
   for (const key of COLOR_KEYS) {
-    if (new RegExp(`\\b${key}\\b`).test(lower)) return COLOR_MAP[key];
+    const match = new RegExp(`\\b${key}\\b`).exec(lower);
+    if (match && (earliest === null || match.index < earliest.idx)) {
+      earliest = { idx: match.index, hex: COLOR_MAP[key] };
+    }
   }
-  return null;
+  return earliest?.hex ?? null;
 }
 
