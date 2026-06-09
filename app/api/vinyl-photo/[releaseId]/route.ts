@@ -19,7 +19,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ releaseId: str
     //   - kind "photo" → process the user's chosen image as the vinyl preview.
     //   - kind "svg"   → return 404 so the album page falls back to its SVG
     //     fallback (which samples the color from the override image itself).
-    const override = getVinylOverride(id);
+    const override = await getVinylOverride(id);
     if (override) {
       if (override.kind !== "photo") {
         return new Response(null, { status: 404 });

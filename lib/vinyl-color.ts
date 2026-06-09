@@ -211,3 +211,56 @@ export function colorHexFromText(text: string): string | null {
   return earliest?.hex ?? null;
 }
 
+// Richer parser for sheet-override notes. Extracts:
+//   - variant   (clear / marbled / splatter / picture, if keywords match)
+//   - primary   (FIRST color word in text)
+//   - secondary (SECOND color word in text)
+//
+// Examples:
+//   "Dark brown with faint yellow swirl" →
+//       { variant: "marbled", primary: brown, secondary: yellow }
+//   "Use pink to create custom SVG version" →
+//       { variant: undefined, primary: pink, secondary: undefined }
+//   "Outer clear color" →
+//       { variant: "clear", primary: undefined, secondary: undefined }
+//
+// The album-page override path uses this to apply ALL three fields to the
+// Vinyl object, enabling marbled rendering for swirl/marble overrides.
+export function parseVinylFromText(text: string): {
+  variant?: VinylVariant;
+  primary?: string;
+  secondary?: string;
+} {
+  const lower = text.toLowerCase();
+  const out: { variant?: VinylVariant; primary?: string; secondary?: string } =
+    {};
+
+  // Variant detection — same keyword patterns detectVinyl uses for Discogs
+  // descriptors. "clear" beats "marbled" if both are present (rare).
+  if (/\bclear\b|translucent|transparent/.test(lower)) {
+    out.variant = "clear";
+  } else if (/splatter|splattered|stripe/.test(lower)) {
+    out.variant = "splatter";
+  } else if (
+    /marbled|marble|swirl|swirled|smoke|tri[\s-]?colou?r|mix\b|shadow/.test(
+      lower,
+    )
+  ) {
+    out.variant = "marbled";
+  } else if (/picture\s*disc/.test(lower)) {
+    out.variant = "picture";
+  }
+
+  // Color names ordered by appearance in the text.
+  const found: { idx: number; hex: string }[] = [];
+  for (const key of COLOR_KEYS) {
+    const match = new RegExp(`\\b${key}\\b`).exec(lower);
+    if (match) found.push({ idx: match.index, hex: COLOR_MAP[key] });
+  }
+  found.sort((a, b) => a.idx - b.idx);
+  if (found[0]) out.primary = found[0].hex;
+  if (found[1]) out.secondary = found[1].hex;
+
+  return out;
+}
+

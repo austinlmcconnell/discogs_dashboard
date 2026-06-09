@@ -15,9 +15,9 @@ import {
 } from "@/lib/discogs";
 import { fetchAlbumWiki } from "@/lib/wikipedia";
 import {
-  colorHexFromText,
   detectVinyl,
   expectedVinylColors,
+  parseVinylFromText,
   ringCheckColors,
 } from "@/lib/vinyl-color";
 import { findVinylShot, sampleOverrideShade, sampleVinylShade } from "@/lib/vinyl-image";
@@ -89,7 +89,7 @@ export default async function AlbumPage({
   //     image's outer ring and apply it to the SVG fallback.
   //   - no override  → run normal detection + (if none found) cross-image
   //     shade sampling.
-  const override = getVinylOverride(releaseId);
+  const override = await getVinylOverride(releaseId);
 
   const vinylPhoto =
     override?.kind === "photo"
@@ -107,20 +107,26 @@ export default async function AlbumPage({
   const vinyl = detectVinyl(colorDescriptors);
 
   if (override?.kind === "svg") {
-    // The note ("Use pink to create custom SVG version", "Outer green color",
-    // "Outer clear color") literally states the intended color and/or
-    // variant — honor it directly. Image sampling is the fallback only when
-    // the note doesn't name anything recognizable.
+    // Parse the note for variant + primary + secondary color and apply all
+    // three. "Dark brown with faint yellow swirl" → marbled brown/yellow.
+    // "Use pink to create custom SVG version" → solid pink (variant
+    // unchanged, inherits whatever detectVinyl returned from Discogs).
+    // "Outer clear color" → clear variant, no color change.
+    // If the note doesn't name anything we can use, fall back to sampling
+    // the dominant color from the override image.
     let noteApplied = false;
     if (override.note) {
-      const noteLower = override.note.toLowerCase();
-      if (/\bclear\b|translucent|transparent/.test(noteLower)) {
-        vinyl.variant = "clear";
+      const parsed = parseVinylFromText(override.note);
+      if (parsed.variant) {
+        vinyl.variant = parsed.variant;
         noteApplied = true;
       }
-      const noteColor = colorHexFromText(override.note);
-      if (noteColor) {
-        vinyl.primary = noteColor;
+      if (parsed.primary) {
+        vinyl.primary = parsed.primary;
+        noteApplied = true;
+      }
+      if (parsed.secondary) {
+        vinyl.secondary = parsed.secondary;
         noteApplied = true;
       }
     }
