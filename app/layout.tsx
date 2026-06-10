@@ -41,6 +41,7 @@ export default function RootLayout({
               <NavLink href="/">Collection</NavLink>
               <NavLink href="/random">Spin</NavLink>
               <NavLink href="/listens">Listens</NavLink>
+              <NavLink href="/stats">Stats</NavLink>
             </nav>
           </div>
         </header>
