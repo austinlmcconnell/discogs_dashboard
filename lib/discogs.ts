@@ -84,6 +84,54 @@ type CollectionPage = {
   releases: CollectionRelease[];
 };
 
+// A wantlist entry. basic_information matches the collection shape closely;
+// we type only the fields we use.
+export type WantlistRelease = {
+  id: number; // release id
+  rating: number;
+  notes?: string;
+  date_added: string;
+  basic_information: {
+    id: number;
+    master_id: number;
+    title: string;
+    year: number;
+    cover_image: string;
+    thumb: string;
+    formats: { name: string; qty: string; descriptions?: string[]; text?: string }[];
+    labels: { name: string; catno: string; id: number }[];
+    artists: { name: string; id: number; anv?: string; join?: string }[];
+    genres?: string[];
+    styles?: string[];
+  };
+};
+
+type WantlistPage = {
+  pagination: { urls: { next?: string } };
+  wants: WantlistRelease[];
+};
+
+export async function fetchWantlist(): Promise<WantlistRelease[]> {
+  const user = username();
+  const all: WantlistRelease[] = [];
+  let url: string | undefined =
+    `${API_BASE}/users/${encodeURIComponent(user)}/wants?per_page=100`;
+  while (url) {
+    const page: WantlistPage = await discogsFetch<WantlistPage>(url);
+    all.push(...page.wants);
+    url = page.pagination.urls.next;
+  }
+  return all;
+}
+
+export function wantPrimaryArtist(want: WantlistRelease): string {
+  return want.basic_information.artists
+    .map((a) => `${a.anv || a.name}${a.join ? ` ${a.join} ` : ""}`)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export async function fetchFullCollection(): Promise<CollectionRelease[]> {
   const user = username();
   const all: CollectionRelease[] = [];

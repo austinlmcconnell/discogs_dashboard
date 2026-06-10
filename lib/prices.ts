@@ -37,7 +37,9 @@ type PriceEntry = { price: number | null; currency: string | null };
 // other caller awaits the same Promise.
 let inflight: Promise<PriceMap> | null = null;
 
-async function throttledRun<T, R>(
+// Exported for reuse by the wantlist price checker — same Discogs rate
+// budget applies to both sweeps.
+export async function throttledRun<T, R>(
   items: T[],
   fn: (item: T) => Promise<R>,
   intervalMs: number,

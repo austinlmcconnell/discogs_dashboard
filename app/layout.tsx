@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { Suspense } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Disc3 } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
+import { getRecentAlerts } from "@/lib/wantlist-store";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -42,6 +44,12 @@ export default function RootLayout({
               <NavLink href="/random">Spin</NavLink>
               <NavLink href="/listens">Listens</NavLink>
               <NavLink href="/stats">Stats</NavLink>
+              <NavLink href="/wantlist">
+                Wantlist
+                <Suspense fallback={null}>
+                  <WantlistBadge />
+                </Suspense>
+              </NavLink>
             </nav>
           </div>
         </header>
@@ -56,9 +64,22 @@ function NavLink({ href, children }: { href: string; children: React.ReactNode }
   return (
     <Link
       href={href}
-      className="px-3 py-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
     >
       {children}
     </Link>
+  );
+}
+
+// Count of wantlist price drops in the last week, shown as a small badge on
+// the Wantlist nav link. One fast store read, streamed via Suspense; renders
+// nothing when there are no fresh drops.
+async function WantlistBadge() {
+  const alerts = await getRecentAlerts(7);
+  if (alerts.length === 0) return null;
+  return (
+    <span className="text-[10px] leading-none rounded-full bg-primary text-primary-foreground px-1.5 py-0.5 font-medium tabular-nums">
+      {alerts.length}
+    </span>
   );
 }

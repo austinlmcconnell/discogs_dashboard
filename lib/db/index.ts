@@ -76,6 +76,19 @@ function initDb(): DrizzleDb | null {
         price REAL NOT NULL,
         recorded_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS wantlist_prices (
+        release_id INTEGER PRIMARY KEY,
+        price REAL,
+        num_for_sale INTEGER,
+        checked_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS wantlist_alerts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        release_id INTEGER NOT NULL,
+        old_price REAL,
+        new_price REAL NOT NULL,
+        created_at TEXT NOT NULL
+      );
     `);
     _db = drizzle(sqlite, { schema });
   } catch (err) {
