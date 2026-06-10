@@ -65,6 +65,17 @@ function initDb(): DrizzleDb | null {
         currency TEXT,
         fetched_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
+      CREATE TABLE IF NOT EXISTS value_snapshots (
+        date TEXT PRIMARY KEY,
+        total REAL NOT NULL,
+        priced INTEGER NOT NULL,
+        count INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS price_baselines (
+        release_id INTEGER PRIMARY KEY,
+        price REAL NOT NULL,
+        recorded_at TEXT NOT NULL
+      );
     `);
     _db = drizzle(sqlite, { schema });
   } catch (err) {

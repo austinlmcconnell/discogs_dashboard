@@ -33,8 +33,26 @@ export const releasePrices = sqliteTable("release_prices", {
     .default(sql`(CURRENT_TIMESTAMP)`),
 });
 
+// Weekly (and on-demand) snapshots of total collection value. One row per
+// EST calendar date — re-snapshotting the same day replaces the row.
+export const valueSnapshots = sqliteTable("value_snapshots", {
+  date: text("date").primaryKey(), // YYYY-MM-DD (EST)
+  total: real("total").notNull(),
+  priced: integer("priced").notNull(), // releases with a known price
+  count: integer("count").notNull(), // total releases in collection
+});
+
+// First price ever recorded per release — the baseline for gainer/loser
+// math ("up $12 since tracking began").
+export const priceBaselines = sqliteTable("price_baselines", {
+  releaseId: integer("release_id").primaryKey(),
+  price: real("price").notNull(),
+  recordedAt: text("recorded_at").notNull(), // YYYY-MM-DD (EST)
+});
+
 export type Listen = typeof listens.$inferSelect;
 export type NewListen = typeof listens.$inferInsert;
 export type Rating = typeof ratings.$inferSelect;
 export type NewRating = typeof ratings.$inferInsert;
 export type ReleasePrice = typeof releasePrices.$inferSelect;
+export type ValueSnapshot = typeof valueSnapshots.$inferSelect;

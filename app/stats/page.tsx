@@ -1,9 +1,16 @@
 import Link from "next/link";
 import Image from "next/image";
+import { after } from "next/server";
 import { fetchFullCollection, primaryArtist } from "@/lib/discogs";
 import type { CollectionRelease } from "@/lib/discogs";
 import { listAllListens } from "@/lib/listens-store";
 import { listAllRatings } from "@/lib/ratings-store";
+import {
+  getBaselines,
+  getLatestPrices,
+  getSnapshots,
+  takeSnapshotIfStale,
+} from "@/lib/value-store";
 
 // Listens and ratings change constantly; render fresh per request. The
 // expensive Discogs collection fetch stays cached at the fetch layer (1h).
@@ -86,12 +93,33 @@ function computeStreaks(listenDates: Set<string>): {
 
 // ─── Page ───────────────────────────────────────────────────────────────────
 
+function formatUsd(value: number): string {
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: "USD",
+      maximumFractionDigits: 0,
+    }).format(value);
+  } catch {
+    return `$${Math.round(value)}`;
+  }
+}
+
 export default async function StatsPage() {
-  const [releases, listens, ratings] = await Promise.all([
-    fetchFullCollection(),
-    listAllListens(100000),
-    listAllRatings(),
-  ]);
+  const [releases, listens, ratings, snapshots, baselines, latestPrices] =
+    await Promise.all([
+      fetchFullCollection(),
+      listAllListens(100000),
+      listAllRatings(),
+      getSnapshots(),
+      getBaselines(),
+      getLatestPrices(),
+    ]);
+
+  // Keep the value series fresh without blocking the render: if the latest
+  // snapshot is >6 days old (or none exists), take one after the response
+  // is sent. The weekly cron is the primary path; this covers gaps.
+  after(() => takeSnapshotIfStale());
 
   const byId = new Map<number, CollectionRelease>(
     releases.map((r) => [r.basic_information.id, r]),
@@ -209,6 +237,53 @@ export default async function StatsPage() {
       return { label: k, value: cumulative };
     });
   }
+
+  // ── Collection value ──
+  const latestSnapshot =
+    snapshots.length > 0 ? snapshots[snapshots.length - 1] : null;
+  const firstSnapshot = snapshots.length > 0 ? snapshots[0] : null;
+  const valueChange =
+    latestSnapshot && firstSnapshot && snapshots.length > 1
+      ? latestSnapshot.total - firstSnapshot.total
+      : null;
+  const valueSeries = snapshots.map((s) => ({
+    label: s.date.slice(5), // MM-DD
+    value: Math.round(s.total),
+  }));
+
+  const mostValuable = latestPrices
+    ? Object.entries(latestPrices)
+        .filter((e): e is [string, number] => e[1] != null)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 6)
+        .map(([idStr, price]) => ({ releaseId: Number(idStr), price }))
+    : [];
+
+  // Gainers/losers vs the first price we ever recorded for each release.
+  // Only meaningful once snapshots have run on at least two different days.
+  const movers = latestPrices
+    ? Object.entries(latestPrices)
+        .filter((e): e is [string, number] => e[1] != null)
+        .map(([idStr, price]) => {
+          const base = baselines[Number(idStr)];
+          return base
+            ? {
+                releaseId: Number(idStr),
+                price,
+                delta: price - base.price,
+                since: base.recordedAt,
+              }
+            : null;
+        })
+        .filter(
+          (m): m is NonNullable<typeof m> => m !== null && Math.abs(m.delta) >= 1,
+        )
+    : [];
+  const gainers = [...movers].sort((a, b) => b.delta - a.delta).slice(0, 5);
+  const losers = [...movers]
+    .sort((a, b) => a.delta - b.delta)
+    .slice(0, 5)
+    .filter((m) => m.delta < 0);
 
   // ── Decades owned ──
   const byDecade = new Map<string, number>();
@@ -409,6 +484,105 @@ export default async function StatsPage() {
         )}
       </Section>
 
+      {/* Collection value */}
+      <Section title="Collection value" eyebrow="Marketplace median, tracked weekly">
+        {!latestSnapshot ? (
+          <EmptyNote>
+            No value snapshot yet — one is being taken in the background.
+            Refresh in a minute.
+          </EmptyNote>
+        ) : (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              <StatTile
+                label="Current value"
+                value={formatUsd(latestSnapshot.total)}
+                sub={`as of ${latestSnapshot.date}`}
+              />
+              <StatTile
+                label="Priced"
+                value={`${latestSnapshot.priced}/${latestSnapshot.count}`}
+                sub="records with a market price"
+              />
+              <StatTile
+                label="Since tracking began"
+                value={
+                  valueChange != null
+                    ? `${valueChange >= 0 ? "+" : "−"}${formatUsd(Math.abs(valueChange))}`
+                    : "—"
+                }
+                sub={
+                  firstSnapshot && snapshots.length > 1
+                    ? `from ${firstSnapshot.date}`
+                    : "needs 2+ snapshots"
+                }
+              />
+            </div>
+
+            {valueSeries.length >= 2 && (
+              <ChartCard>
+                <AreaChart data={valueSeries} height={160} />
+              </ChartCard>
+            )}
+
+            <div className="grid lg:grid-cols-2 gap-6">
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold tracking-tight">
+                  Most valuable
+                </h3>
+                {mostValuable.length === 0 ? (
+                  <EmptyNote>No price data yet.</EmptyNote>
+                ) : (
+                  <ul className="space-y-2">
+                    {mostValuable.map(({ releaseId, price }, i) => (
+                      <RecordRow
+                        key={releaseId}
+                        rank={i + 1}
+                        release={byId.get(releaseId)}
+                        releaseId={releaseId}
+                        right={formatUsd(price)}
+                      />
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold tracking-tight">
+                  Biggest movers
+                </h3>
+                {gainers.length === 0 && losers.length === 0 ? (
+                  <EmptyNote>
+                    Movers appear once prices shift between snapshots.
+                  </EmptyNote>
+                ) : (
+                  <ul className="space-y-2">
+                    {gainers.map((m) => (
+                      <RecordRow
+                        key={`g${m.releaseId}`}
+                        release={byId.get(m.releaseId)}
+                        releaseId={m.releaseId}
+                        right={`+${formatUsd(m.delta)}`}
+                        rightClass="text-emerald-400"
+                      />
+                    ))}
+                    {losers.map((m) => (
+                      <RecordRow
+                        key={`l${m.releaseId}`}
+                        release={byId.get(m.releaseId)}
+                        releaseId={m.releaseId}
+                        right={`−${formatUsd(Math.abs(m.delta))}`}
+                        rightClass="text-red-400"
+                      />
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </Section>
+
       {/* Collection growth */}
       <Section title="Collection growth" eyebrow="Cumulative records">
         {growthSeries.length < 2 ? (
@@ -420,6 +594,61 @@ export default async function StatsPage() {
         )}
       </Section>
     </div>
+  );
+}
+
+function RecordRow({
+  rank,
+  release,
+  releaseId,
+  right,
+  rightClass = "text-primary",
+}: {
+  rank?: number;
+  release: CollectionRelease | undefined;
+  releaseId: number;
+  right: string;
+  rightClass?: string;
+}) {
+  const info = release?.basic_information;
+  return (
+    <li>
+      <Link
+        href={`/album/${releaseId}`}
+        className="flex items-center gap-3 rounded-lg border border-border/60 bg-card/40 p-2.5 hover:bg-card/70 transition-colors"
+      >
+        {rank != null && (
+          <div className="text-xs text-muted-foreground tabular-nums w-4 text-center shrink-0">
+            {rank}
+          </div>
+        )}
+        <div className="w-11 h-11 shrink-0 relative rounded overflow-hidden bg-muted ring-1 ring-white/5">
+          {info?.thumb && (
+            <Image
+              src={info.thumb}
+              alt={info.title}
+              fill
+              sizes="44px"
+              className="object-cover"
+              unoptimized
+            />
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-medium truncate">
+            {info?.title ?? `Release ${releaseId}`}
+          </div>
+          {release && (
+            <div className="text-xs text-muted-foreground truncate">
+              {primaryArtist(release)}
+            </div>
+          )}
+        </div>
+        <div className={`text-sm tabular-nums shrink-0 ${rightClass}`}>
+          {right}
+        </div>
+      </Link>
+    </li>
   );
 }
 

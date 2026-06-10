@@ -1,8 +1,10 @@
 import { Suspense } from "react";
+import Link from "next/link";
 import { fetchFullCollection } from "@/lib/discogs";
 import { CollectionGrid } from "@/components/collection-grid";
 import { Skeleton } from "@/components/ui/skeleton";
 import { listAllRatings } from "@/lib/ratings-store";
+import { getLatestSnapshot } from "@/lib/value-store";
 
 // The home page reads the user's ratings on every request so the rating
 // sort reflects changes immediately. The expensive Discogs collection fetch
@@ -23,6 +25,33 @@ async function Collection() {
   const ratingMap: Record<number, number> = {};
   for (const r of allRatings) ratingMap[r.releaseId] = r.rating;
   return <CollectionGrid releases={releases} ratingMap={ratingMap} />;
+}
+
+// Latest collection-value snapshot — a single Redis read, never the slow
+// live price build. Streams in under the header; renders nothing until the
+// first snapshot exists.
+async function HeaderValue() {
+  const snapshot = await getLatestSnapshot();
+  if (!snapshot) return null;
+  const formatted = new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(snapshot.total);
+  return (
+    <Link
+      href="/stats"
+      className="inline-flex items-baseline gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+    >
+      Collection value
+      <span className="font-semibold text-primary tabular-nums">
+        {formatted}
+      </span>
+      <span className="text-xs text-muted-foreground/70">
+        as of {snapshot.date}
+      </span>
+    </Link>
+  );
 }
 
 function CollectionSkeleton() {
@@ -52,6 +81,9 @@ export default function Page() {
         <p className="text-sm text-muted-foreground">
           Search anything, spin a random record, or click in for tracklists and trivia.
         </p>
+        <Suspense fallback={null}>
+          <HeaderValue />
+        </Suspense>
       </div>
       <Suspense fallback={<CollectionSkeleton />}>
         <Collection />
