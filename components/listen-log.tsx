@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import type { Listen } from "@/lib/listens-store";
+import { logListenWithRating } from "@/lib/log-listen";
 
 function formatDate(iso: string) {
   const d = new Date(iso.endsWith("Z") ? iso : `${iso}Z`);
@@ -46,31 +47,7 @@ export function ListenLog({
   function logListen() {
     startTransition(async () => {
       try {
-        const listenPromise = fetch(`/api/listens`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ releaseId, notes: notes || undefined }),
-        });
-        // Fire the rating update in parallel when a rating is set. If the
-        // user left rating null we skip the PUT entirely so we don't create
-        // a zero/blank rating row.
-        const ratingPromise =
-          rating !== null
-            ? fetch(`/api/ratings/${releaseId}`, {
-                method: "PUT",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ rating }),
-              })
-            : Promise.resolve(null);
-
-        const [listenRes, ratingRes] = await Promise.all([
-          listenPromise,
-          ratingPromise,
-        ]);
-        if (!listenRes.ok) throw new Error("listen failed");
-        if (ratingRes && !ratingRes.ok) throw new Error("rating failed");
-
-        const { listen } = (await listenRes.json()) as { listen: Listen };
+        const listen = await logListenWithRating(releaseId, { notes, rating });
         setListens((prev) => [listen, ...prev]);
         setNotes("");
         toast.success(
@@ -78,8 +55,8 @@ export function ListenLog({
             ? `Listen logged · rated ${rating}/10`
             : "Listen logged",
         );
-        // Pull a fresh server render so the RatingInput on the page shows the
-        // updated rating (and the home-page rating sort, etc.).
+        // Pull a fresh server render so the rest of the page (and the
+        // home-page rating sort, etc.) reflects the new data.
         router.refresh();
       } catch {
         toast.error("Couldn't log listen");

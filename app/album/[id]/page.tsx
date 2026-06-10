@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { buttonVariants } from "@/components/ui/button";
 import { ListenLog } from "@/components/listen-log";
+import { NowSpinning } from "@/components/now-spinning";
 import { VinylSleeve } from "@/components/vinyl-sleeve";
 import { listListens } from "@/lib/listens-store";
 import { getRating } from "@/lib/ratings-store";
@@ -250,8 +251,24 @@ export default async function AlbumPage({
               />
             </div>
 
-            {release.uri && (
-              <div className="pt-2">
+            <div className="pt-2 flex flex-wrap items-center gap-2">
+              <NowSpinning
+                releaseId={releaseId}
+                title={release.title}
+                artist={artist}
+                cover={cover}
+                vinyl={vinyl}
+                photoUrl={
+                  vinylPhoto ? `/api/vinyl-photo/${releaseId}?v=18` : null
+                }
+                tracklist={release.tracklist.map((t) => ({
+                  position: t.position,
+                  title: t.title,
+                  duration: t.duration,
+                }))}
+                initialRating={userRating?.rating ?? null}
+              />
+              {release.uri && (
                 <a
                   href={release.uri}
                   target="_blank"
@@ -260,8 +277,8 @@ export default async function AlbumPage({
                 >
                   View on Discogs <ExternalLink className="w-3.5 h-3.5" />
                 </a>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
       </div>

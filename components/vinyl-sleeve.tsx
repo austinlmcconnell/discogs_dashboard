@@ -65,7 +65,9 @@ function isDarkColor(hex: string): boolean {
   return Math.max((n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff) < 60;
 }
 
-function VinylDisc({
+// Exported for the Now Spinning overlay, which renders the disc alone
+// (no sleeve) at large size with the spin always running.
+export function VinylDisc({
   vinyl,
   cover,
   photoUrl,
