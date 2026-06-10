@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import { Disc3, Music2, Star, X } from "lucide-react";
+import { Disc3, Star, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { VinylDisc } from "@/components/vinyl-sleeve";
@@ -65,13 +66,21 @@ export function NowSpinning(props: Props) {
         <Disc3 className="w-4 h-4" />
         Now Spinning
       </Button>
-      {startMs != null ? (
-        <SpinningOverlay
-          {...props}
-          startMs={startMs}
-          onClose={() => setStartMs(null)}
-        />
-      ) : null}
+      {startMs != null
+        ? // Portal to <body>: the album hero uses CSS `isolate`, which traps
+          // a fixed overlay's z-index inside the hero's stacking context —
+          // page content below the hero would paint OVER the overlay. Safe
+          // to touch document here: this branch is only reachable after a
+          // client-side click (startMs starts null on the server render).
+          createPortal(
+            <SpinningOverlay
+              {...props}
+              startMs={startMs}
+              onClose={() => setStartMs(null)}
+            />,
+            document.body,
+          )
+        : null}
     </>
   );
 }
@@ -90,7 +99,6 @@ function SpinningOverlay({
 }: Props & { startMs: number; onClose: () => void }) {
   const router = useRouter();
   const [elapsed, setElapsed] = useState(0);
-  const [currentPos, setCurrentPos] = useState<string | null>(null);
   const [rating, setRating] = useState<number | null>(initialRating);
   const [hover, setHover] = useState<number | null>(null);
   const [notes, setNotes] = useState("");
@@ -176,36 +184,20 @@ function SpinningOverlay({
                 </div>
               ) : null}
               <ol className="rounded-lg border border-border/50 bg-card/30 divide-y divide-border/30">
-                {group.tracks.map((t, i) => {
-                  const isCurrent = currentPos === `${gi}-${i}`;
-                  return (
-                    <li key={`${t.position}-${i}`}>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setCurrentPos(isCurrent ? null : `${gi}-${i}`)
-                        }
-                        className={`w-full grid grid-cols-[2.5rem_1fr_auto] gap-3 px-4 py-2 text-sm items-center text-left transition-colors ${
-                          isCurrent
-                            ? "bg-primary/10 text-primary"
-                            : "hover:bg-muted/30"
-                        }`}
-                      >
-                        <span className="text-xs tabular-nums text-muted-foreground">
-                          {isCurrent ? (
-                            <Music2 className="w-3.5 h-3.5 text-primary" />
-                          ) : (
-                            t.position || "—"
-                          )}
-                        </span>
-                        <span className="truncate">{t.title}</span>
-                        <span className="text-xs tabular-nums text-muted-foreground">
-                          {t.duration}
-                        </span>
-                      </button>
-                    </li>
-                  );
-                })}
+                {group.tracks.map((t, i) => (
+                  <li
+                    key={`${t.position}-${i}`}
+                    className="grid grid-cols-[2.5rem_1fr_auto] gap-3 px-4 py-2 text-sm items-center"
+                  >
+                    <span className="text-xs tabular-nums text-muted-foreground">
+                      {t.position || "—"}
+                    </span>
+                    <span className="truncate">{t.title}</span>
+                    <span className="text-xs tabular-nums text-muted-foreground">
+                      {t.duration}
+                    </span>
+                  </li>
+                ))}
               </ol>
             </div>
           ))}
